@@ -1,0 +1,10 @@
+*.log
+logs/
+*.db
+*.db-shm
+*.db-wal
+autonomous_corpus_snapshot*
+cortex_deploy.zip
+env.sh
+__pycache__/
+*.pyc

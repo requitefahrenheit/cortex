@@ -1,0 +1,1556 @@
+<!DOCTYPE html><html><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>cortex · mondrian</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{overflow:hidden;font-family:-apple-system,system-ui,'Segoe UI',sans-serif;background:#08080a;color:#ccc;display:flex}
+#cloud-side{position:fixed;top:0;left:0;bottom:0;right:40%;overflow:hidden;transition:left .25s ease}
+#panel-side{position:fixed;top:0;right:0;bottom:0;left:60%;background:#0a0a0c;border-left:1px solid #161618;display:flex;flex-direction:column;font-size:12px}
+#p-empty{padding:20px;flex:1}
+#p-content{flex:1;overflow-y:auto;padding:20px}
+@media(max-width:900px){#cloud-side{right:45%}#panel-side{left:55%}}
+@media(max-width:600px){#cloud-side{right:50%}#panel-side{left:50%}}
+#canvas-container{position:absolute;inset:0}
+#label-canvas{position:absolute;inset:0;pointer-events:none;z-index:10}
+
+#search-wrap{position:fixed;top:14px;left:14px;z-index:91;display:flex;align-items:center;gap:0}
+body.bk-open #search-wrap{left:234px}
+#search{width:140px;background:none;border:none;border-bottom:1px solid #222;color:#888;font-size:10px;padding:4px 0;font-family:inherit;letter-spacing:.04em;outline:none;transition:border-color .3s}
+#search:focus{border-color:#555}
+#search-clear{background:none;border:none;color:#444;font-size:12px;cursor:pointer;padding:2px 4px;font-family:inherit;display:none;transition:color .15s}
+#search-clear:hover{color:#aaa}
+#server-switch{position:fixed;top:14px;right:calc(40% + 90px);z-index:91;background:none;border:1px solid #222;border-radius:3px;padding:2px 6px;font-size:9px;cursor:pointer;font-family:inherit;letter-spacing:.04em;color:#555;transition:all .2s;-webkit-appearance:none;appearance:none;outline:none;max-width:100px}
+#server-switch:hover{border-color:#444;color:#999}
+#server-switch:focus{border-color:#555;color:#aaa}
+#server-switch option{background:#111;color:#ccc}
+body.day #server-switch{border-color:#ccc;color:#aaa}
+body.day #server-switch option{background:#fff;color:#333}
+body.cloudy #server-switch{border-color:#444;color:#888}
+body.cloudy #server-switch option{background:#2a2a2e;color:#ccc}
+@media(max-width:900px){#server-switch{right:calc(45% + 90px)}}
+@media(max-width:600px){#server-switch{right:calc(50% + 90px)}}
+#btn-theme{position:fixed;top:14px;right:calc(40% + 50px);z-index:91;background:none;border:none;font-size:16px;cursor:pointer;font-family:inherit;padding:4px;transition:opacity .2s;opacity:.5}
+@media(max-width:900px){#btn-theme{right:calc(45% + 50px)}}
+@media(max-width:600px){#btn-theme{right:calc(50% + 50px)}}
+#btn-view{position:fixed;top:14px;right:calc(40% + 14px);z-index:91;background:none;border:1px solid #333;border-radius:3px;padding:3px 8px;font-size:10px;cursor:pointer;font-family:inherit;letter-spacing:.05em;color:#555;transition:all .2s}
+@media(max-width:900px){#btn-view{right:calc(45% + 14px)}}
+@media(max-width:600px){#btn-view{right:calc(50% + 14px)}}
+#btn-view:hover{border-color:#666;color:#999}
+#btn-view.active{border-color:#555;color:#aaa}
+body.day #btn-view{border-color:#ccc;color:#aaa}
+body.day #btn-view:hover{border-color:#999;color:#666}
+#btn-theme:hover{opacity:1}
+#btn-back{position:absolute;bottom:36px;left:14px;z-index:80;background:none;border:1px solid #333;border-radius:3px;padding:3px 10px;font-size:10px;cursor:pointer;font-family:inherit;letter-spacing:.05em;color:#888;transition:all .2s, bottom .25s ease}
+#btn-back:hover{border-color:#666;color:#ccc}
+
+#bk-bar{position:fixed;top:42px;left:14px;z-index:90;display:flex;gap:6px;align-items:center}
+body.bk-open #bk-bar{left:234px}
+#bk-add{background:none;border:1px solid #222;border-radius:3px;width:22px;height:22px;font-size:14px;cursor:pointer;font-family:inherit;color:#555;transition:all .15s;display:flex;align-items:center;justify-content:center;padding:0}
+#bk-add:hover{border-color:#444;color:#999}
+#bk-open{background:none;border:1px solid #222;border-radius:3px;padding:3px 8px;font-size:10px;cursor:pointer;font-family:inherit;color:#555;transition:all .15s;letter-spacing:.03em}
+#bk-open:hover{border-color:#444;color:#999}
+#bk-open.active{border-color:#444;color:#aaa}
+#bk-sidebar{position:fixed;top:0;left:0;bottom:0;width:220px;background:#0a0a0c;border-right:1px solid #161618;z-index:85;transform:translateX(-100%);transition:transform .25s ease;display:flex;flex-direction:column;padding:14px 10px}
+#bk-sidebar.open{transform:translateX(0)}
+body.bk-open #cloud-side{left:220px}
+.bk-head{font-size:10px;color:#555;letter-spacing:.04em;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between}
+.bk-head-close{background:none;border:none;color:#444;font-size:14px;cursor:pointer;padding:2px}
+.bk-head-close:hover{color:#999}
+.bk-entries{flex:1;overflow-y:auto}
+.bk-item{display:flex;align-items:center;gap:6px;padding:8px 8px;border-radius:4px;cursor:pointer;transition:background .15s;font-size:10px;color:#888}
+.bk-item:hover{background:#151518}
+.bk-item-label{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bk-item-sub{font-size:9px;color:#444;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bk-item-del{background:none;border:none;color:#333;font-size:12px;cursor:pointer;padding:0 2px;transition:color .15s;flex-shrink:0}
+.bk-item-del:hover{color:#a55}
+.bk-empty{font-size:10px;color:#333;padding:20px 8px;text-align:center}
+body.day #bk-add{border-color:#ddd;color:#aaa}
+body.day #bk-add:hover{border-color:#bbb;color:#666}
+body.day #bk-open{border-color:#ddd;color:#aaa}
+body.day #bk-open:hover{border-color:#bbb;color:#666}
+body.day #bk-sidebar{background:#f8f8f6;border-color:#e5e5e0}
+body.day .bk-head{color:#aaa}
+body.day .bk-head-close{color:#bbb}
+body.day .bk-item{color:#666}
+body.day .bk-item:hover{background:#f0f0ec}
+body.day .bk-item-sub{color:#bbb}
+body.day .bk-item-del{color:#ccc}
+body.day .bk-item-del:hover{color:#a55}
+
+#breadcrumb{position:absolute;bottom:12px;left:14px;z-index:80;font-size:13px;font-family:inherit;letter-spacing:.03em;pointer-events:none;white-space:nowrap;color:#999;font-weight:400;transition:bottom .25s ease}
+#breadcrumb span{opacity:.5;transition:opacity .2s}
+#breadcrumb .bc-current{opacity:1;font-weight:600;color:#ddd}
+
+body.day{background:#f4f3f0;color:#333}
+body.day #panel-side{background:#fff;border-color:#e5e5e0}
+body.day #search{color:#999;border-color:#ddd}
+body.day #search:focus{border-color:#aaa}
+body.day #search-clear{color:#bbb}
+body.day #btn-back{border-color:#bbb;color:#666}
+body.day .p-title{color:#222}
+body.day .p-body{color:#666}
+body.day .p-meta{color:#aaa}
+body.day .p-tags span{background:#f0f0ec;color:#888}
+body.day #breadcrumb{color:#666}
+body.day #breadcrumb .bc-current{color:#333}
+body.day #dict-panel{background:#f4f3f0}
+body.day .dict-back{color:#999}
+body.day .dict-cnt{color:#aaa}
+body.day .da{color:#ccc}body.day .da.has{color:#888}
+body.day .dl{color:#bbb;border-color:#e5e5e0}
+body.day .dex{color:#666;background:#fff}
+body.day .dex:hover{background:#f8f8f6}
+body.day .dtg span{background:#f0f0ec;color:#999}
+body.day .dd{color:#bbb}
+body.day .db{color:#ccc}
+body.day #enrich-status{color:#bbb}
+
+.p-empty{color:#444;font-size:11px;padding-top:40vh;text-align:center;letter-spacing:.03em}
+body.day .p-empty{color:#bbb}
+.p-title{font-weight:600;margin-bottom:8px;font-size:13px;color:#ddd}
+.p-body{color:#999;line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:35vh;overflow-y:auto}
+.p-meta{margin-top:10px;color:#444;font-size:10px}
+.p-tags{margin-top:8px;display:flex;flex-wrap:wrap;gap:4px}
+.p-tags span{background:#111;color:#888;padding:3px 8px;border-radius:3px;font-size:10px;cursor:pointer;transition:all .15s}
+.p-tags span:hover{background:#1a1a1c;color:#ccc}
+.p-entities{margin-top:4px;display:flex;flex-wrap:wrap;gap:4px}
+.p-entities span{background:#111;color:#888;padding:3px 8px;border-radius:3px;font-size:10px;cursor:pointer;transition:all .15s}
+.p-entities span:hover{background:#1a1a1c;color:#ccc}
+.p-entities span::before{content:'◆ ';font-size:7px;color:#a87030;vertical-align:middle}
+.p-rels{display:none}
+.p-rels em{display:none}
+body.day .p-tags span{background:#f0f0ec;color:#666}
+body.day .p-tags span:hover{background:#e5e5e0;color:#333}
+body.day .p-entities span{background:#f0f0ec;color:#666}
+body.day .p-entities span:hover{background:#e5e5e0;color:#333}
+body.day .p-entities span::before{color:#8a5a2a}
+
+.p-xrefs{margin-top:4px;display:flex;flex-wrap:wrap;gap:4px}
+.p-xrefs span{background:#111;color:#888;padding:3px 8px;border-radius:3px;font-size:10px;cursor:pointer;transition:all .15s}
+.p-xrefs span:hover{background:#1a1a1c;color:#ccc}
+.p-xrefs span::before{content:'→ ';color:#5080c0;font-size:9px}
+body.day .p-xrefs span{background:#f0f0ec;color:#666}
+body.day .p-xrefs span::before{color:#3060a0}
+
+.p-section-label{margin-top:14px;font-size:9px;color:#555;letter-spacing:.04em;margin-bottom:4px;font-weight:500}
+body.day .p-section-label{color:#999}
+
+.p-excerpt{margin-top:6px;color:#777;line-height:1.5;white-space:pre-wrap;word-break:break-word;max-height:30vh;overflow-y:auto;font-size:11px;border-left:2px solid #222;padding-left:10px}
+.p-excerpt .exc-role{color:#555;font-weight:600;font-size:10px}
+.p-excerpt .exc-user{color:#c8a050}
+.p-excerpt .exc-assistant{color:#5888b8}
+body.day .p-excerpt{border-color:#ddd;color:#555}
+body.day .p-excerpt .exc-user{color:#8a6a20}
+body.day .p-excerpt .exc-assistant{color:#3868a0}
+
+.p-sib-nav{display:flex;align-items:center;gap:8px;padding:12px 20px;border-top:1px solid #161618;flex-shrink:0}
+body.day .p-sib-nav{border-top-color:#e5e5e0}
+.p-sib-label{flex:1;font-size:9px;color:#444;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center}
+.p-sib-btn{background:none;border:1px solid #222;border-radius:3px;color:#555;font-size:12px;cursor:pointer;padding:4px 10px;font-family:inherit;transition:all .15s}
+.p-sib-btn:hover{border-color:#444;color:#999}
+.p-sib-btn:disabled{opacity:.2;cursor:default}
+body.day .p-sib-btn{border-color:#ddd;color:#aaa}
+body.day .p-sib-btn:hover{border-color:#bbb;color:#666}
+body.day .p-sib-label{color:#bbb}
+
+/* Cloudy theme — dark text on medium grey */
+body.cloudy{background:#2a2a2e;color:#d0d0d0}
+body.cloudy #panel-side{background:#222225;border-color:#333338}
+body.cloudy #bk-sidebar{background:#222225;border-color:#333338}
+body.cloudy #search{border-color:#444;color:#aaa}
+body.cloudy #search:focus{border-color:#666}
+body.cloudy #bk-add,body.cloudy #bk-open{border-color:#444;color:#888}
+body.cloudy #btn-back{border-color:#444;color:#aaa}
+body.cloudy .p-title{color:#e0e0e0}
+body.cloudy .p-body{color:#b0b0b0}
+body.cloudy .p-meta{color:#666}
+body.cloudy .p-tags span{background:#333;color:#aaa}
+body.cloudy .p-tags span:hover{background:#444;color:#ccc}
+body.cloudy .p-entities span{background:#333;color:#aaa}
+body.cloudy .p-xrefs span{background:#333;color:#aaa}
+body.cloudy .p-section-label{color:#666}
+body.cloudy .p-excerpt{border-color:#444;color:#999}
+body.cloudy .p-sib-nav{border-top-color:#333338}
+body.cloudy .p-sib-btn{border-color:#444;color:#888}
+body.cloudy .p-empty{color:#555}
+body.cloudy .bk-head{color:#888}
+body.cloudy .bk-item{color:#aaa}
+body.cloudy .bk-item:hover{background:#2e2e32}
+body.cloudy #breadcrumb{color:#aaa}
+body.cloudy #breadcrumb .bc-current{color:#e0e0e0}
+
+#dict-panel{display:none;position:fixed;top:0;left:0;right:40%;bottom:0;background:#08080a;z-index:70;overflow-y:auto;padding:60px 20px 20px}
+@media(max-width:900px){#dict-panel{right:45%}}
+@media(max-width:600px){#dict-panel{right:50%}}
+.dict-head{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.dict-back{background:none;border:none;color:#555;cursor:pointer;font-family:inherit;font-size:11px}
+.dict-cnt{color:#444;font-size:10px}
+#dict-alpha{display:flex;flex-wrap:wrap;gap:2px;margin-bottom:12px}
+.da{background:none;border:none;color:#333;font-size:10px;cursor:pointer;padding:2px 4px;font-family:inherit}.da.has{color:#666}
+.dl{font-size:9px;color:#555;border-top:1px solid #111;padding:6px 0 2px;margin-top:8px}
+.dex{font-size:10px;color:#666;background:#0c0c0e;padding:8px;border-radius:4px;margin:3px 0;cursor:pointer;transition:background .15s;line-height:1.5}
+.dex:hover{background:#141416}
+.dtg{margin-top:3px;display:flex;flex-wrap:wrap;gap:3px}
+.dtg span{background:#111;color:#555;padding:1px 5px;border-radius:2px;font-size:8px}
+.dd{font-size:9px;color:#444;margin-top:2px}
+.db{font-size:8px;color:#444;margin-top:1px}
+
+/* ═══ Tree view ═══ */
+#tree-side{display:none;position:fixed;top:0;left:0;bottom:0;right:40%;overflow-y:auto;transition:left .25s ease;background:#08080a}
+body.day #tree-side{background:#f4f3f0}
+body.bk-open #tree-side{left:220px}
+@media(max-width:900px){#tree-side{right:45%}}
+@media(max-width:600px){#tree-side{right:50%}}
+.tree-wrap{padding:74px 12px 40px;font-size:12px}
+.tree-node{user-select:none}
+.tree-row{display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:3px;cursor:pointer;transition:background .12s;white-space:nowrap}
+.tree-row:hover,.tree-row:focus{background:#151518;outline:none}
+.tree-arrow{width:14px;text-align:center;font-size:10px;color:#555;flex-shrink:0;transition:transform .15s}
+.tree-arrow.open{transform:rotate(90deg)}
+.tree-label{overflow:hidden;text-overflow:ellipsis;color:#999;font-size:11px;letter-spacing:.02em}
+.tree-count{color:#444;font-size:9px;margin-left:2px;flex-shrink:0}
+.tree-row.leaf .tree-label{color:#888}
+.tree-row.leaf:hover .tree-label{color:#ccc}
+.tree-row.leaf.selected{background:#1a1c22}
+.tree-row.leaf.selected .tree-label{color:#ddd;font-weight:600}
+.tree-row.leaf.search-dim{opacity:.2}
+.tree-row.cluster.search-dim{opacity:.35}
+.tree-row.leaf.time-dim{opacity:.2}
+.tree-row.cluster.time-dim{opacity:.35}
+.tree-children{overflow:hidden}
+body.day .tree-row:hover,body.day .tree-row:focus{background:#f0f0ec;outline:none}
+body.day .tree-label{color:#666}
+body.day .tree-count{color:#bbb}
+body.day .tree-row.leaf .tree-label{color:#777}
+body.day .tree-row.leaf:hover .tree-label{color:#333}
+body.day .tree-row.leaf.selected{background:#e8e8e4}
+body.day .tree-row.leaf.selected .tree-label{color:#222}
+
+/* ═══ Timeline ═══ */
+#tl-toggle{position:fixed;bottom:36px;right:calc(40% + 14px);z-index:91;background:none;border:1px solid #333;border-radius:3px;padding:3px 8px;font-size:10px;cursor:pointer;font-family:inherit;letter-spacing:.05em;color:#555;transition:all .2s}
+@media(max-width:900px){#tl-toggle{right:calc(45% + 14px)}}
+@media(max-width:600px){#tl-toggle{right:calc(50% + 14px)}}
+#tl-toggle:hover{border-color:#666;color:#999}
+#tl-toggle.active{border-color:#555;color:#aaa}
+body.day #tl-toggle{border-color:#ccc;color:#aaa}
+body.cloudy #tl-toggle{border-color:#444;color:#888}
+
+#tl-bar{position:fixed;bottom:0;left:0;right:40%;z-index:91;background:#0c0c0e;border-top:1px solid #161618;padding:8px 14px 10px;transform:translateY(100%);transition:transform .25s ease;display:flex;flex-direction:column;gap:6px}
+body.bk-open #tl-bar{left:220px}
+@media(max-width:900px){#tl-bar{right:45%}}
+@media(max-width:600px){#tl-bar{right:50%}}
+#tl-bar.open{transform:translateY(0)}
+body.day #tl-bar{background:#f8f8f6;border-top-color:#e5e5e0}
+body.cloudy #tl-bar{background:#222225;border-top-color:#333338}
+
+.tl-top{display:flex;align-items:center;gap:6px}
+.tl-presets{display:flex;gap:3px}
+.tl-preset{background:none;border:1px solid #222;border-radius:3px;padding:2px 8px;font-size:9px;cursor:pointer;font-family:inherit;color:#555;letter-spacing:.03em;transition:all .15s}
+.tl-preset:hover{border-color:#444;color:#999}
+.tl-preset.active{border-color:#556;color:#aac;background:#151520}
+body.day .tl-preset{border-color:#ddd;color:#999}
+body.day .tl-preset:hover{border-color:#bbb;color:#666}
+body.day .tl-preset.active{border-color:#99a;color:#556;background:#eef0f4}
+body.cloudy .tl-preset{border-color:#444;color:#888}
+body.cloudy .tl-preset.active{border-color:#556;color:#aac;background:#2a2a35}
+
+.tl-range-label{flex:1;text-align:right;font-size:9px;color:#444;letter-spacing:.03em}
+body.day .tl-range-label{color:#bbb}
+body.cloudy .tl-range-label{color:#666}
+
+.tl-slider-wrap{position:relative;height:24px;user-select:none;-webkit-user-select:none}
+.tl-track{position:absolute;top:10px;left:0;right:0;height:4px;background:#1a1a1e;border-radius:2px}
+body.day .tl-track{background:#e0e0dc}
+body.cloudy .tl-track{background:#333338}
+.tl-fill{position:absolute;top:10px;height:4px;background:#334;border-radius:2px}
+body.day .tl-fill{background:#c0c4d0}
+body.cloudy .tl-fill{background:#3a3a48}
+.tl-handle{position:absolute;top:5px;width:14px;height:14px;background:#556;border-radius:7px;cursor:ew-resize;transform:translateX(-7px);transition:background .15s;z-index:2}
+.tl-handle:hover,.tl-handle.dragging{background:#88a}
+body.day .tl-handle{background:#99a}
+body.day .tl-handle:hover,body.day .tl-handle.dragging{background:#668}
+body.cloudy .tl-handle{background:#667}
+.tl-tick-labels{display:flex;justify-content:space-between;font-size:8px;color:#333;margin-top:-2px;pointer-events:none}
+body.day .tl-tick-labels{color:#ccc}
+body.cloudy .tl-tick-labels{color:#555}
+body.tl-open #breadcrumb{bottom:85px}
+body.tl-open #enrich-status{bottom:48px}
+body.tl-open #tl-toggle{bottom:82px}
+body.tl-open #btn-back{bottom:82px}
+
+#loader{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:999;background:#08080a;transition:opacity .4s}
+#loader.gone{opacity:0;pointer-events:none}
+#loader-dot{width:3px;height:3px;background:#555;border-radius:50%;animation:blink 1.6s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:.2}50%{opacity:1}}
+::-webkit-scrollbar{width:3px}::-webkit-scrollbar-track{background:none}::-webkit-scrollbar-thumb{background:#333}
+</style>
+</head><body>
+
+<div id="bk-sidebar">
+  <div class="bk-head">
+    <span>bookmarks</span>
+    <button class="bk-head-close" id="bk-close" title="Close">&times;</button>
+  </div>
+  <div class="bk-entries" id="bk-entries"></div>
+</div>
+
+<div id="tree-side" style="display:none">
+  <div class="tree-wrap" id="tree-wrap"></div>
+</div>
+
+<button id="btn-view" title="Toggle cloud/tree (Tab)">tree</button>
+
+<div id="bk-bar">
+  <button id="bk-add" title="Bookmark this view">+</button>
+  <button id="bk-open" title="Show bookmarks">open</button>
+</div>
+
+<div id="search-wrap">
+  <input type="text" id="search" placeholder="search" />
+  <button id="search-clear" title="clear">&times;</button>
+</div>
+<button id="btn-theme" title="Toggle theme">☀️</button>
+
+<div id="cloud-side">
+  <div id="canvas-container"></div>
+  <canvas id="label-canvas"></canvas>
+  <button id="btn-back" style="display:none">&#8592; back</button>
+  <div id="breadcrumb">all entries</div>
+  <div id="enrich-status" style="position:absolute;bottom:4px;left:12px;font-size:9px;color:#333;z-index:5;font-family:inherit;letter-spacing:.04em;pointer-events:none;transition:bottom .25s ease"></div>
+</div>
+
+<button id="tl-toggle" title="Timeline">⏱</button>
+<div id="tl-bar">
+  <div class="tl-top">
+    <div class="tl-presets">
+      <button class="tl-preset" data-tl="1d">1D</button>
+      <button class="tl-preset" data-tl="1w">1W</button>
+      <button class="tl-preset" data-tl="1m">1M</button>
+      <button class="tl-preset" data-tl="3m">3M</button>
+      <button class="tl-preset" data-tl="1y">1Y</button>
+      <button class="tl-preset active" data-tl="all">ALL</button>
+    </div>
+    <div class="tl-range-label" id="tl-range-label">all time</div>
+  </div>
+  <div class="tl-slider-wrap" id="tl-slider">
+    <div class="tl-track"></div>
+    <div class="tl-fill" id="tl-fill"></div>
+    <div class="tl-handle" id="tl-left" style="left:0%"></div>
+    <div class="tl-handle" id="tl-right" style="left:100%"></div>
+  </div>
+  <div class="tl-tick-labels" id="tl-ticks"></div>
+</div>
+
+<div id="panel-side">
+  <div class="p-empty" id="p-empty">select an entry</div>
+  <div id="p-content" style="display:none">
+    <div class="p-title" id="p-title"></div>
+    <div class="p-body" id="p-body"></div>
+    <div id="p-excerpt-wrap" style="display:none">
+      <div class="p-section-label">original conversation</div>
+      <div class="p-excerpt" id="p-excerpt"></div>
+    </div>
+    <div class="p-meta" id="p-meta"></div>
+    <div class="p-tags" id="p-tags"></div>
+    <div class="p-entities" id="p-entities"></div>
+    <div class="p-rels" id="p-rels"></div>
+    <div id="p-xrefs-wrap" style="display:none">
+      <div class="p-section-label">related topics</div>
+      <div class="p-xrefs" id="p-xrefs"></div>
+    </div>
+  </div>
+  <div id="p-siblings-wrap" style="display:none">
+    <div class="p-sib-nav">
+      <button class="p-sib-btn" id="p-sib-prev" title="Previous">←</button>
+      <div style="flex:1;text-align:center;min-width:0">
+        <div class="p-sib-label" id="p-siblings-label"></div>
+        <span class="p-sib-label" id="p-sib-pos"></span>
+      </div>
+      <button class="p-sib-btn" id="p-sib-next" title="Next">→</button>
+    </div>
+  </div>
+</div>
+
+<div id="dict-panel">
+  <div class="dict-head">
+    <button class="dict-back" id="dict-back">&#8592; cloud</button>
+    <span class="dict-cnt" id="dict-count"></span>
+  </div>
+  <div id="dict-alpha"></div>
+  <div id="dict-entries"></div>
+</div>
+
+<div id="loader"><div id="loader-dot"></div></div>
+
+<select id="server-switch" title="Switch Cortex database"></select>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+"use strict";
+
+// ═══════════════════════════════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════════════════════════════
+const API_BASE = location.origin;
+const POINT_SIZE = 4.0;
+const HOVER_SIZE = 8.0;
+const CLUSTER_SPREAD = 2.4;
+const LABEL_FONT = '10px -apple-system, system-ui, sans-serif';
+const LABEL_BOLD = 'bold 10px -apple-system, system-ui, sans-serif';
+
+// ═══════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════
+let allEntries = [];
+let visibleEntries = [];
+let allTags = [];
+let allEntities = [];
+let entityIndex = {};
+let enrichedCount = 0;
+
+let selectedEntry = null;
+let hoveredIndex = -1;
+let drillStack = [];        // breadcrumb navigation stack
+let searchQuery = '';
+let searchMatches = new Set();
+let timeRange = [0, 1];     // normalized 0-1
+let timeMin = 0, timeMax = 0;
+
+let viewMode = 'cloud';     // 'cloud' | 'tree'
+let themeIndex = 0;
+const themes = ['', 'day', 'cloudy'];
+const themeIcons = ['☀️', '🌙', '☁️'];
+
+// Three.js
+let scene, camera, renderer, points, raycaster, mouse;
+let pointPositions, pointColors, pointSizes;
+let labelCanvas, labelCtx;
+let animFrame;
+let camTarget = new THREE.Vector3(0, 0, 0);
+let camDistance = 3.5;
+let camTheta = 0.3, camPhi = 0.8;
+let isDragging = false, dragStart = {x:0, y:0};
+let autoRotate = true;
+
+// Clustering
+let clusters = [];
+let clusterTree = null;
+
+// Siblings navigation
+let siblingsList = [];
+let siblingIndex = -1;
+
+// ═══════════════════════════════════════════════════════════════
+// DOM REFS
+// ═══════════════════════════════════════════════════════════════
+const $ = id => document.getElementById(id);
+const loader      = $('loader');
+const searchEl    = $('search');
+const searchClear = $('search-clear');
+const btnTheme    = $('btn-theme');
+const btnView     = $('btn-view');
+const btnBack     = $('btn-back');
+const breadcrumb  = $('breadcrumb');
+const enrichStatus= $('enrich-status');
+const canvasCont  = $('canvas-container');
+const cloudSide   = $('cloud-side');
+const treeSide    = $('tree-side');
+const treeWrap    = $('tree-wrap');
+const panelEmpty  = $('p-empty');
+const panelContent= $('p-content');
+const pTitle      = $('p-title');
+const pBody       = $('p-body');
+const pMeta       = $('p-meta');
+const pTags       = $('p-tags');
+const pEntities   = $('p-entities');
+const pRels       = $('p-rels');
+const pXrefs      = $('p-xrefs');
+const pXrefsWrap  = $('p-xrefs-wrap');
+const pExcerpt    = $('p-excerpt');
+const pExcerptWrap= $('p-excerpt-wrap');
+const pSiblingsWrap=$('p-siblings-wrap');
+const pSiblingsLabel=$('p-siblings-label');
+const pSibPos     = $('p-sib-pos');
+const pSibPrev    = $('p-sib-prev');
+const pSibNext    = $('p-sib-next');
+const dictPanel   = $('dict-panel');
+const dictBack    = $('dict-back');
+const dictCount   = $('dict-count');
+const dictAlpha   = $('dict-alpha');
+const dictEntries = $('dict-entries');
+const bkSidebar   = $('bk-sidebar');
+const bkEntries   = $('bk-entries');
+const bkAdd       = $('bk-add');
+const bkOpen      = $('bk-open');
+const bkClose     = $('bk-close');
+const tlToggle    = $('tl-toggle');
+const tlBar       = $('tl-bar');
+const tlFill      = $('tl-fill');
+const tlLeft      = $('tl-left');
+const tlRight     = $('tl-right');
+const tlRangeLabel= $('tl-range-label');
+const tlTicks     = $('tl-ticks');
+const serverSwitch= $('server-switch');
+
+// ═══════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════
+function api(path) {
+  return fetch(API_BASE + path).then(r => r.json());
+}
+function apiPost(path, body) {
+  return fetch(API_BASE + path, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)}).then(r => r.json());
+}
+function apiDelete(path) {
+  return fetch(API_BASE + path, {method:'DELETE'}).then(r => r.json());
+}
+
+function truncate(s, n) { return s.length > n ? s.slice(0, n) + '…' : s; }
+function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+function fmtDate(ts) {
+  try {
+    const d = new Date(ts);
+    return d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) +
+           ' ' + d.toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit'});
+  } catch { return ts; }
+}
+
+function relDate(ts) {
+  try {
+    const d = new Date(ts);
+    const now = Date.now();
+    const diff = now - d.getTime();
+    if (diff < 60000) return 'just now';
+    if (diff < 3600000) return Math.floor(diff/60000) + 'm ago';
+    if (diff < 86400000) return Math.floor(diff/3600000) + 'h ago';
+    if (diff < 604800000) return Math.floor(diff/86400000) + 'd ago';
+    return d.toLocaleDateString('en-US', {month:'short', day:'numeric'});
+  } catch { return ts; }
+}
+
+function tagColor(tag, alpha) {
+  let h = 0;
+  for (let i = 0; i < tag.length; i++) h = (h * 31 + tag.charCodeAt(i)) & 0xffffff;
+  const hue = h % 360;
+  return `hsla(${hue}, 40%, 55%, ${alpha || 1})`;
+}
+
+function entryMatchesSearch(e, q) {
+  if (!q) return true;
+  const ql = q.toLowerCase();
+  return e.content.toLowerCase().includes(ql) ||
+         e.tags.some(t => t.toLowerCase().includes(ql)) ||
+         (e.source || '').toLowerCase().includes(ql) ||
+         (e.summary || '').toLowerCase().includes(ql) ||
+         (e.entities || []).some(en => en.toLowerCase().includes(ql));
+}
+
+function entryInTimeRange(e) {
+  if (timeRange[0] === 0 && timeRange[1] === 1) return true;
+  const t = new Date(e.timestamp).getTime();
+  const lo = timeMin + (timeMax - timeMin) * timeRange[0];
+  const hi = timeMin + (timeMax - timeMin) * timeRange[1];
+  return t >= lo && t <= hi;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CLUSTERING (hierarchical k-means on cluster coords)
+// ═══════════════════════════════════════════════════════════════
+function kmeans(items, k, getVec) {
+  if (items.length <= k) return items.map(it => [it]);
+  // init centroids
+  const centroids = [];
+  const used = new Set();
+  for (let i = 0; i < k; i++) {
+    let idx;
+    do { idx = Math.floor(Math.random() * items.length); } while (used.has(idx));
+    used.add(idx);
+    centroids.push(getVec(items[idx]).slice());
+  }
+  const dim = centroids[0].length;
+  let assignments = new Array(items.length).fill(0);
+  for (let iter = 0; iter < 20; iter++) {
+    // assign
+    let changed = false;
+    for (let i = 0; i < items.length; i++) {
+      const v = getVec(items[i]);
+      let best = 0, bestDist = Infinity;
+      for (let c = 0; c < k; c++) {
+        let d = 0;
+        for (let d2 = 0; d2 < dim; d2++) d += (v[d2] - centroids[c][d2]) ** 2;
+        if (d < bestDist) { bestDist = d; best = c; }
+      }
+      if (assignments[i] !== best) { assignments[i] = best; changed = true; }
+    }
+    if (!changed) break;
+    // update centroids
+    for (let c = 0; c < k; c++) {
+      const members = items.filter((_, i) => assignments[i] === c);
+      if (members.length === 0) continue;
+      for (let d = 0; d < dim; d++) {
+        centroids[c][d] = members.reduce((s, m) => s + getVec(m)[d], 0) / members.length;
+      }
+    }
+  }
+  const groups = [];
+  for (let c = 0; c < k; c++) {
+    const members = items.filter((_, i) => assignments[i] === c);
+    if (members.length > 0) groups.push(members);
+  }
+  return groups;
+}
+
+function buildClusterTree(entries, depth) {
+  if (entries.length <= 8 || depth >= 3) {
+    return { type: 'leaf', entries, label: clusterLabel(entries) };
+  }
+  const k = Math.min(Math.max(3, Math.ceil(entries.length / 10)), 8);
+  const groups = kmeans(entries, k, e => e.cc || [0]);
+  if (groups.length <= 1) {
+    return { type: 'leaf', entries, label: clusterLabel(entries) };
+  }
+  const children = groups.map(g => buildClusterTree(g, depth + 1));
+  children.sort((a, b) => {
+    const ae = a.type === 'leaf' ? a.entries : flatEntries(a);
+    const be = b.type === 'leaf' ? b.entries : flatEntries(b);
+    return be.length - ae.length;
+  });
+  return { type: 'cluster', children, label: clusterLabel(entries), entries };
+}
+
+function flatEntries(node) {
+  if (node.type === 'leaf') return node.entries;
+  let out = [];
+  for (const c of node.children) out = out.concat(flatEntries(c));
+  return out;
+}
+
+function clusterLabel(entries) {
+  // Find most common tag among entries
+  const freq = {};
+  for (const e of entries) {
+    for (const t of e.tags) {
+      freq[t] = (freq[t] || 0) + 1;
+    }
+  }
+  let best = '', bestN = 0;
+  for (const [t, n] of Object.entries(freq)) {
+    if (n > bestN) { bestN = n; best = t; }
+  }
+  if (best) return best;
+  // Fallback: first few words of first entry summary or content
+  const txt = entries[0].summary || entries[0].content;
+  return truncate(txt, 30);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// THREE.JS SETUP
+// ═══════════════════════════════════════════════════════════════
+function initThree() {
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(50, 1, 0.01, 100);
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
+  canvasCont.appendChild(renderer.domElement);
+
+  raycaster = new THREE.Raycaster();
+  raycaster.params.Points.threshold = 0.04;
+  mouse = new THREE.Vector2();
+
+  labelCanvas = $('label-canvas');
+  labelCtx = labelCanvas.getContext('2d');
+
+  resize();
+  window.addEventListener('resize', resize);
+}
+
+function resize() {
+  const rect = canvasCont.getBoundingClientRect();
+  const w = rect.width, h = rect.height;
+  if (w === 0 || h === 0) return;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+  labelCanvas.width = w * devicePixelRatio;
+  labelCanvas.height = h * devicePixelRatio;
+  labelCanvas.style.width = w + 'px';
+  labelCanvas.style.height = h + 'px';
+}
+
+function updateCamera() {
+  const x = camTarget.x + camDistance * Math.sin(camPhi) * Math.cos(camTheta);
+  const y = camTarget.y + camDistance * Math.cos(camPhi);
+  const z = camTarget.z + camDistance * Math.sin(camPhi) * Math.sin(camTheta);
+  camera.position.set(x, y, z);
+  camera.lookAt(camTarget);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// BUILD POINT CLOUD
+// ═══════════════════════════════════════════════════════════════
+function buildCloud() {
+  // Remove old
+  if (points) scene.remove(points);
+
+  const entries = visibleEntries;
+  const n = entries.length;
+  if (n === 0) return;
+
+  const geom = new THREE.BufferGeometry();
+  pointPositions = new Float32Array(n * 3);
+  pointColors = new Float32Array(n * 3);
+  pointSizes = new Float32Array(n);
+
+  for (let i = 0; i < n; i++) {
+    const e = entries[i];
+    pointPositions[i*3]   = e.x * CLUSTER_SPREAD;
+    pointPositions[i*3+1] = e.y * CLUSTER_SPREAD;
+    pointPositions[i*3+2] = e.z * CLUSTER_SPREAD;
+
+    // Color by primary tag
+    const tag = e.tags[0] || 'default';
+    const c = new THREE.Color(tagColor(tag, 1));
+    pointColors[i*3]   = c.r;
+    pointColors[i*3+1] = c.g;
+    pointColors[i*3+2] = c.b;
+
+    pointSizes[i] = POINT_SIZE;
+  }
+
+  geom.setAttribute('position', new THREE.BufferAttribute(pointPositions, 3));
+  geom.setAttribute('color', new THREE.BufferAttribute(pointColors, 3));
+  geom.setAttribute('size', new THREE.Float32BufferAttribute(pointSizes, 1));
+
+  const mat = new THREE.ShaderMaterial({
+    vertexColors: true,
+    transparent: true,
+    depthWrite: false,
+    uniforms: { pixelRatio: { value: devicePixelRatio } },
+    vertexShader: `
+      attribute float size;
+      varying vec3 vColor;
+      uniform float pixelRatio;
+      void main() {
+        vColor = color;
+        vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+        gl_PointSize = size * pixelRatio * (300.0 / -mvPos.z);
+        gl_Position = projectionMatrix * mvPos;
+      }
+    `,
+    fragmentShader: `
+      varying vec3 vColor;
+      void main() {
+        float d = length(gl_PointCoord - vec2(0.5));
+        if (d > 0.5) discard;
+        float a = smoothstep(0.5, 0.3, d);
+        gl_FragColor = vec4(vColor, a * 0.85);
+      }
+    `
+  });
+
+  points = new THREE.Points(geom, mat);
+  scene.add(points);
+}
+
+function updatePointAppearance() {
+  if (!points || visibleEntries.length === 0) return;
+  const n = visibleEntries.length;
+  const sizes = points.geometry.attributes.size;
+  const colors = points.geometry.attributes.color;
+
+  for (let i = 0; i < n; i++) {
+    const e = visibleEntries[i];
+    const isSelected = selectedEntry && e.id === selectedEntry.id;
+    const isHovered = i === hoveredIndex;
+    const matchesSearch = !searchQuery || searchMatches.has(e.id);
+    const matchesTime = entryInTimeRange(e);
+    const dimmed = (!matchesSearch || !matchesTime);
+
+    sizes.array[i] = isHovered ? HOVER_SIZE : isSelected ? HOVER_SIZE * 0.8 : POINT_SIZE;
+
+    const tag = e.tags[0] || 'default';
+    const c = new THREE.Color(tagColor(tag, 1));
+    const alpha = dimmed ? 0.1 : 1;
+    colors.array[i*3]   = c.r * alpha + (1-alpha)*0.1;
+    colors.array[i*3+1] = c.g * alpha + (1-alpha)*0.1;
+    colors.array[i*3+2] = c.b * alpha + (1-alpha)*0.1;
+  }
+
+  sizes.needsUpdate = true;
+  colors.needsUpdate = true;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LABELS (2D canvas overlay)
+// ═══════════════════════════════════════════════════════════════
+function drawLabels() {
+  if (!labelCtx || !camera || visibleEntries.length === 0) return;
+  const w = labelCanvas.width, h = labelCanvas.height;
+  labelCtx.clearRect(0, 0, w, h);
+  labelCtx.textBaseline = 'middle';
+
+  const dpr = devicePixelRatio;
+  const rect = canvasCont.getBoundingClientRect();
+
+  // Only draw labels for hovered/selected or cluster centers
+  const toDraw = [];
+
+  if (hoveredIndex >= 0 && hoveredIndex < visibleEntries.length) {
+    toDraw.push({ entry: visibleEntries[hoveredIndex], bold: true });
+  }
+  if (selectedEntry) {
+    const idx = visibleEntries.findIndex(e => e.id === selectedEntry.id);
+    if (idx >= 0 && idx !== hoveredIndex) {
+      toDraw.push({ entry: visibleEntries[idx], bold: true });
+    }
+  }
+
+  for (const { entry, bold } of toDraw) {
+    const v = new THREE.Vector3(entry.x * CLUSTER_SPREAD, entry.y * CLUSTER_SPREAD, entry.z * CLUSTER_SPREAD);
+    v.project(camera);
+    const sx = (v.x * 0.5 + 0.5) * rect.width * dpr;
+    const sy = (-v.y * 0.5 + 0.5) * rect.height * dpr;
+
+    if (v.z > 1) continue; // behind camera
+
+    const label = truncate(entry.summary || entry.content, 50);
+    labelCtx.font = bold ? LABEL_BOLD : LABEL_FONT;
+    const isDay = document.body.classList.contains('day');
+    labelCtx.fillStyle = isDay ? '#333' : '#ccc';
+    labelCtx.fillText(label, sx + 12 * dpr, sy);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ANIMATION LOOP
+// ═══════════════════════════════════════════════════════════════
+function animate() {
+  animFrame = requestAnimationFrame(animate);
+  if (autoRotate && !isDragging) camTheta += 0.001;
+  updateCamera();
+  renderer.render(scene, camera);
+  drawLabels();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// INTERACTION (orbit + hover + click)
+// ═══════════════════════════════════════════════════════════════
+function initControls() {
+  const el = renderer.domElement;
+
+  el.addEventListener('pointerdown', e => {
+    isDragging = true;
+    autoRotate = false;
+    dragStart = { x: e.clientX, y: e.clientY };
+    el.setPointerCapture(e.pointerId);
+  });
+
+  el.addEventListener('pointermove', e => {
+    const rect = canvasCont.getBoundingClientRect();
+    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+    if (isDragging) {
+      const dx = e.clientX - dragStart.x;
+      const dy = e.clientY - dragStart.y;
+      camTheta -= dx * 0.005;
+      camPhi = Math.max(0.1, Math.min(Math.PI - 0.1, camPhi - dy * 0.005));
+      dragStart = { x: e.clientX, y: e.clientY };
+    } else {
+      // Raycast hover
+      raycaster.setFromCamera(mouse, camera);
+      if (points) {
+        const intersects = raycaster.intersectObject(points);
+        const newHover = intersects.length > 0 ? intersects[0].index : -1;
+        if (newHover !== hoveredIndex) {
+          hoveredIndex = newHover;
+          updatePointAppearance();
+          el.style.cursor = hoveredIndex >= 0 ? 'pointer' : 'grab';
+        }
+      }
+    }
+  });
+
+  el.addEventListener('pointerup', e => {
+    const wasDrag = Math.abs(e.clientX - dragStart.x) > 3 || Math.abs(e.clientY - dragStart.y) > 3;
+    isDragging = false;
+    if (!wasDrag && hoveredIndex >= 0 && hoveredIndex < visibleEntries.length) {
+      selectEntry(visibleEntries[hoveredIndex]);
+    }
+  });
+
+  el.addEventListener('wheel', e => {
+    e.preventDefault();
+    camDistance = Math.max(0.5, Math.min(20, camDistance + e.deltaY * 0.003));
+  }, { passive: false });
+
+  // Double-click to drill into cluster around point
+  el.addEventListener('dblclick', e => {
+    if (hoveredIndex >= 0 && hoveredIndex < visibleEntries.length) {
+      drillIntoNeighbors(visibleEntries[hoveredIndex]);
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// DRILL / NAVIGATION
+// ═══════════════════════════════════════════════════════════════
+function drillIntoNeighbors(entry) {
+  // Find entries near this one using cc (cluster coords) cosine similarity
+  const scored = visibleEntries.map(e => {
+    if (!e.cc || !entry.cc) return { e, sim: 0 };
+    let dot = 0, a = 0, b = 0;
+    for (let i = 0; i < e.cc.length; i++) {
+      dot += e.cc[i] * entry.cc[i];
+      a += e.cc[i] ** 2;
+      b += entry.cc[i] ** 2;
+    }
+    return { e, sim: (a && b) ? dot / (Math.sqrt(a) * Math.sqrt(b)) : 0 };
+  });
+  scored.sort((a, b) => b.sim - a.sim);
+  const neighbors = scored.slice(0, Math.max(20, Math.ceil(visibleEntries.length * 0.2))).map(s => s.e);
+
+  drillStack.push({ entries: visibleEntries, label: breadcrumb.textContent });
+  setVisibleEntries(neighbors, truncate(entry.summary || entry.content, 30));
+  btnBack.style.display = '';
+}
+
+function drillBack() {
+  if (drillStack.length === 0) return;
+  const prev = drillStack.pop();
+  setVisibleEntries(prev.entries, prev.label);
+  if (drillStack.length === 0) btnBack.style.display = 'none';
+}
+
+function setVisibleEntries(entries, label) {
+  visibleEntries = entries;
+  buildCloud();
+  updatePointAppearance();
+  updateBreadcrumb(label);
+  if (viewMode === 'tree') buildTreeView();
+  camDistance = 3.5;
+  camTarget.set(0, 0, 0);
+  // Recenter around mean position
+  if (entries.length > 0) {
+    let mx=0, my=0, mz=0;
+    for (const e of entries) { mx += e.x; my += e.y; mz += e.z; }
+    mx /= entries.length; my /= entries.length; mz /= entries.length;
+    // Reproject relative to center
+    for (const e of entries) { e.x -= mx; e.y -= my; e.z -= mz; }
+    // Normalize
+    let maxv = 0;
+    for (const e of entries) maxv = Math.max(maxv, Math.abs(e.x), Math.abs(e.y), Math.abs(e.z));
+    if (maxv > 0) for (const e of entries) { e.x /= maxv; e.y /= maxv; e.z /= maxv; }
+    buildCloud();
+  }
+}
+
+function updateBreadcrumb(label) {
+  let html = '';
+  for (const s of drillStack) {
+    html += `<span>${escHtml(s.label)}</span> › `;
+  }
+  html += `<span class="bc-current">${escHtml(label || 'all entries')}</span>`;
+  breadcrumb.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SELECTION / DETAIL PANEL
+// ═══════════════════════════════════════════════════════════════
+function selectEntry(entry) {
+  selectedEntry = entry;
+  updatePointAppearance();
+  showPanel(entry);
+  // Set up siblings from current visible + search/time filtered
+  siblingsList = visibleEntries.filter(e => {
+    const ms = !searchQuery || searchMatches.has(e.id);
+    const mt = entryInTimeRange(e);
+    return ms && mt;
+  });
+  siblingIndex = siblingsList.findIndex(e => e.id === entry.id);
+  updateSiblings();
+
+  // Highlight in tree if visible
+  if (viewMode === 'tree') highlightTreeEntry(entry.id);
+}
+
+function showPanel(e) {
+  panelEmpty.style.display = 'none';
+  panelContent.style.display = '';
+
+  pTitle.textContent = e.summary || truncate(e.content, 80);
+  pBody.textContent = e.content;
+  pMeta.innerHTML = `${fmtDate(e.timestamp)} · ${e.source || 'unknown'} · <span style="opacity:.5">${e.id.slice(0,8)}</span>`;
+
+  // Tags
+  pTags.innerHTML = '';
+  for (const t of e.tags) {
+    const sp = document.createElement('span');
+    sp.textContent = t;
+    sp.style.borderLeft = `2px solid ${tagColor(t)}`;
+    sp.addEventListener('click', () => filterByTag(t));
+    pTags.appendChild(sp);
+  }
+
+  // Entities
+  pEntities.innerHTML = '';
+  for (const ent of (e.entities || [])) {
+    const sp = document.createElement('span');
+    sp.textContent = ent;
+    sp.addEventListener('click', () => filterByEntity(ent));
+    pEntities.appendChild(sp);
+  }
+
+  // Cross-references (entities shared with other entries)
+  pXrefs.innerHTML = '';
+  const xrefs = new Set();
+  for (const ent of (e.entities || [])) {
+    const related = (entityIndex[ent] || []).filter(id => id !== e.id);
+    for (const rid of related) xrefs.add(rid);
+  }
+  if (xrefs.size > 0) {
+    pXrefsWrap.style.display = '';
+    for (const rid of xrefs) {
+      const re = allEntries.find(x => x.id === rid);
+      if (!re) continue;
+      const sp = document.createElement('span');
+      sp.textContent = truncate(re.summary || re.content, 40);
+      sp.addEventListener('click', () => selectEntry(re));
+      pXrefs.appendChild(sp);
+    }
+  } else {
+    pXrefsWrap.style.display = 'none';
+  }
+
+  // Raw excerpt
+  if (e.raw_excerpt) {
+    pExcerptWrap.style.display = '';
+    pExcerpt.innerHTML = formatExcerpt(e.raw_excerpt);
+  } else {
+    pExcerptWrap.style.display = 'none';
+  }
+}
+
+function formatExcerpt(raw) {
+  // Try to parse as conversation turns
+  const lines = raw.split('\n');
+  let html = '';
+  for (const line of lines) {
+    if (/^(user|human):/i.test(line)) {
+      html += `<span class="exc-role exc-user">user:</span> ${escHtml(line.replace(/^(user|human):\s*/i, ''))}\n`;
+    } else if (/^(assistant|claude):/i.test(line)) {
+      html += `<span class="exc-role exc-assistant">assistant:</span> ${escHtml(line.replace(/^(assistant|claude):\s*/i, ''))}\n`;
+    } else {
+      html += escHtml(line) + '\n';
+    }
+  }
+  return html;
+}
+
+function clearSelection() {
+  selectedEntry = null;
+  panelEmpty.style.display = '';
+  panelContent.style.display = 'none';
+  pSiblingsWrap.style.display = 'none';
+  updatePointAppearance();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SIBLINGS NAVIGATION
+// ═══════════════════════════════════════════════════════════════
+function updateSiblings() {
+  if (siblingsList.length <= 1) {
+    pSiblingsWrap.style.display = 'none';
+    return;
+  }
+  pSiblingsWrap.style.display = '';
+  pSibPos.textContent = `${siblingIndex + 1} / ${siblingsList.length}`;
+  pSibPrev.disabled = siblingIndex <= 0;
+  pSibNext.disabled = siblingIndex >= siblingsList.length - 1;
+}
+
+pSibPrev.addEventListener('click', () => {
+  if (siblingIndex > 0) { siblingIndex--; selectEntry(siblingsList[siblingIndex]); }
+});
+pSibNext.addEventListener('click', () => {
+  if (siblingIndex < siblingsList.length - 1) { siblingIndex++; selectEntry(siblingsList[siblingIndex]); }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// SEARCH
+// ═══════════════════════════════════════════════════════════════
+let searchTimeout;
+searchEl.addEventListener('input', () => {
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(applySearch, 200);
+  searchClear.style.display = searchEl.value ? '' : 'none';
+});
+searchClear.addEventListener('click', () => {
+  searchEl.value = '';
+  searchClear.style.display = 'none';
+  applySearch();
+});
+
+function applySearch() {
+  searchQuery = searchEl.value.trim();
+  searchMatches.clear();
+  if (searchQuery) {
+    for (const e of visibleEntries) {
+      if (entryMatchesSearch(e, searchQuery)) searchMatches.add(e.id);
+    }
+  }
+  updatePointAppearance();
+  if (viewMode === 'tree') updateTreeDimming();
+}
+
+function filterByTag(tag) {
+  searchEl.value = tag;
+  searchClear.style.display = '';
+  applySearch();
+}
+
+function filterByEntity(ent) {
+  searchEl.value = ent;
+  searchClear.style.display = '';
+  applySearch();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// THEME
+// ═══════════════════════════════════════════════════════════════
+btnTheme.addEventListener('click', () => {
+  themeIndex = (themeIndex + 1) % themes.length;
+  document.body.className = document.body.className.replace(/\b(day|cloudy)\b/g, '').trim();
+  if (themes[themeIndex]) document.body.classList.add(themes[themeIndex]);
+  btnTheme.textContent = themeIcons[themeIndex];
+  // Update renderer background
+  const bg = themes[themeIndex] === 'day' ? 0xf4f3f0 :
+             themes[themeIndex] === 'cloudy' ? 0x2a2a2e : 0x08080a;
+  renderer.setClearColor(bg, 1);
+  localStorage.setItem('cortex-theme', themeIndex);
+});
+
+function restoreTheme() {
+  const saved = localStorage.getItem('cortex-theme');
+  if (saved !== null) {
+    themeIndex = parseInt(saved) || 0;
+    document.body.className = document.body.className.replace(/\b(day|cloudy)\b/g, '').trim();
+    if (themes[themeIndex]) document.body.classList.add(themes[themeIndex]);
+    btnTheme.textContent = themeIcons[themeIndex];
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// VIEW TOGGLE (cloud / tree)
+// ═══════════════════════════════════════════════════════════════
+btnView.addEventListener('click', toggleView);
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === 'Tab') { e.preventDefault(); toggleView(); }
+  if (e.key === 'Escape') {
+    if (dictPanel.style.display === 'block') { dictPanel.style.display = 'none'; return; }
+    if (drillStack.length > 0) { drillBack(); return; }
+    clearSelection();
+  }
+  if (e.key === 'ArrowUp' && selectedEntry) { e.preventDefault(); pSibPrev.click(); }
+  if (e.key === 'ArrowDown' && selectedEntry) { e.preventDefault(); pSibNext.click(); }
+});
+
+function toggleView() {
+  viewMode = viewMode === 'cloud' ? 'tree' : 'cloud';
+  btnView.textContent = viewMode === 'cloud' ? 'tree' : 'cloud';
+  btnView.classList.toggle('active', viewMode === 'tree');
+
+  if (viewMode === 'tree') {
+    cloudSide.style.display = 'none';
+    treeSide.style.display = '';
+    buildTreeView();
+  } else {
+    cloudSide.style.display = '';
+    treeSide.style.display = 'none';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TREE VIEW
+// ═══════════════════════════════════════════════════════════════
+function buildTreeView() {
+  treeWrap.innerHTML = '';
+  clusterTree = buildClusterTree(visibleEntries, 0);
+  renderTreeNode(clusterTree, treeWrap, 0);
+}
+
+function renderTreeNode(node, parent, depth) {
+  if (node.type === 'leaf' && node.entries.length === 1) {
+    // Single entry leaf
+    const e = node.entries[0];
+    const row = document.createElement('div');
+    row.className = 'tree-row leaf';
+    row.style.paddingLeft = (depth * 16 + 6) + 'px';
+    row.tabIndex = 0;
+    row.dataset.entryId = e.id;
+
+    const label = document.createElement('span');
+    label.className = 'tree-label';
+    label.textContent = truncate(e.summary || e.content, 60);
+    row.appendChild(label);
+
+    const age = document.createElement('span');
+    age.className = 'tree-count';
+    age.textContent = relDate(e.timestamp);
+    row.appendChild(age);
+
+    row.addEventListener('click', () => selectEntry(e));
+    parent.appendChild(row);
+    return;
+  }
+
+  const entries = node.type === 'leaf' ? node.entries : flatEntries(node);
+  const div = document.createElement('div');
+  div.className = 'tree-node';
+
+  const row = document.createElement('div');
+  row.className = 'tree-row cluster';
+  row.style.paddingLeft = (depth * 16 + 6) + 'px';
+
+  const arrow = document.createElement('span');
+  arrow.className = 'tree-arrow';
+  arrow.textContent = '▶';
+  row.appendChild(arrow);
+
+  const label = document.createElement('span');
+  label.className = 'tree-label';
+  label.textContent = node.label;
+  row.appendChild(label);
+
+  const cnt = document.createElement('span');
+  cnt.className = 'tree-count';
+  cnt.textContent = entries.length;
+  row.appendChild(cnt);
+
+  const children = document.createElement('div');
+  children.className = 'tree-children';
+  children.style.display = depth < 1 ? '' : 'none';
+  if (depth < 1) arrow.classList.add('open');
+
+  row.addEventListener('click', () => {
+    const open = children.style.display !== 'none';
+    children.style.display = open ? 'none' : '';
+    arrow.classList.toggle('open', !open);
+  });
+
+  div.appendChild(row);
+
+  if (node.type === 'cluster') {
+    for (const child of node.children) {
+      renderTreeNode(child, children, depth + 1);
+    }
+  } else {
+    // leaf with multiple entries
+    for (const e of node.entries) {
+      renderTreeNode({ type: 'leaf', entries: [e], label: '' }, children, depth + 1);
+    }
+  }
+
+  div.appendChild(children);
+  parent.appendChild(div);
+}
+
+function highlightTreeEntry(id) {
+  treeWrap.querySelectorAll('.tree-row.leaf').forEach(el => {
+    el.classList.toggle('selected', el.dataset.entryId === id);
+  });
+}
+
+function updateTreeDimming() {
+  treeWrap.querySelectorAll('.tree-row.leaf').forEach(el => {
+    const id = el.dataset.entryId;
+    el.classList.toggle('search-dim', searchQuery && !searchMatches.has(id));
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TIMELINE
+// ═══════════════════════════════════════════════════════════════
+let tlDragging = null;
+
+tlToggle.addEventListener('click', () => {
+  const open = tlBar.classList.toggle('open');
+  tlToggle.classList.toggle('active', open);
+  document.body.classList.toggle('tl-open', open);
+});
+
+function initTimeline() {
+  if (allEntries.length === 0) return;
+  const times = allEntries.map(e => new Date(e.timestamp).getTime()).sort((a,b) => a-b);
+  timeMin = times[0];
+  timeMax = times[times.length - 1];
+
+  // Tick labels
+  tlTicks.innerHTML = '';
+  const nTicks = 5;
+  for (let i = 0; i < nTicks; i++) {
+    const t = timeMin + (timeMax - timeMin) * i / (nTicks - 1);
+    const sp = document.createElement('span');
+    sp.textContent = new Date(t).toLocaleDateString('en-US', {month:'short', day:'numeric'});
+    tlTicks.appendChild(sp);
+  }
+
+  // Handle dragging
+  const slider = $('tl-slider');
+  function handleDown(handle, side) {
+    return e => {
+      e.preventDefault();
+      tlDragging = side;
+      handle.classList.add('dragging');
+      const onMove = ev => {
+        const rect = slider.getBoundingClientRect();
+        let pct = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+        if (side === 'left') {
+          timeRange[0] = Math.min(pct, timeRange[1] - 0.01);
+        } else {
+          timeRange[1] = Math.max(pct, timeRange[0] + 0.01);
+        }
+        updateTimelineUI();
+        applyTimeFilter();
+      };
+      const onUp = () => {
+        tlDragging = null;
+        handle.classList.remove('dragging');
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+      };
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+    };
+  }
+
+  tlLeft.addEventListener('pointerdown', handleDown(tlLeft, 'left'));
+  tlRight.addEventListener('pointerdown', handleDown(tlRight, 'right'));
+
+  // Presets
+  document.querySelectorAll('.tl-preset').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tl-preset').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const val = btn.dataset.tl;
+      if (val === 'all') {
+        timeRange = [0, 1];
+      } else {
+        const now = Date.now();
+        const map = { '1d': 86400000, '1w': 604800000, '1m': 2592000000, '3m': 7776000000, '1y': 31536000000 };
+        const cutoff = now - (map[val] || 0);
+        timeRange[0] = Math.max(0, (cutoff - timeMin) / (timeMax - timeMin));
+        timeRange[1] = 1;
+      }
+      updateTimelineUI();
+      applyTimeFilter();
+    });
+  });
+
+  updateTimelineUI();
+}
+
+function updateTimelineUI() {
+  tlLeft.style.left = (timeRange[0] * 100) + '%';
+  tlRight.style.left = (timeRange[1] * 100) + '%';
+  tlFill.style.left = (timeRange[0] * 100) + '%';
+  tlFill.style.width = ((timeRange[1] - timeRange[0]) * 100) + '%';
+
+  const lo = new Date(timeMin + (timeMax - timeMin) * timeRange[0]);
+  const hi = new Date(timeMin + (timeMax - timeMin) * timeRange[1]);
+  if (timeRange[0] === 0 && timeRange[1] === 1) {
+    tlRangeLabel.textContent = 'all time';
+  } else {
+    tlRangeLabel.textContent = lo.toLocaleDateString('en-US', {month:'short', day:'numeric'}) +
+      ' – ' + hi.toLocaleDateString('en-US', {month:'short', day:'numeric'});
+  }
+}
+
+function applyTimeFilter() {
+  updatePointAppearance();
+  if (viewMode === 'tree') {
+    treeWrap.querySelectorAll('.tree-row.leaf').forEach(el => {
+      const id = el.dataset.entryId;
+      const e = allEntries.find(x => x.id === id);
+      el.classList.toggle('time-dim', e && !entryInTimeRange(e));
+    });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// BOOKMARKS
+// ═══════════════════════════════════════════════════════════════
+let bookmarks = [];
+
+bkOpen.addEventListener('click', () => {
+  const open = bkSidebar.classList.toggle('open');
+  bkOpen.classList.toggle('active', open);
+  document.body.classList.toggle('bk-open', open);
+});
+bkClose.addEventListener('click', () => {
+  bkSidebar.classList.remove('open');
+  bkOpen.classList.remove('active');
+  document.body.classList.remove('bk-open');
+});
+
+bkAdd.addEventListener('click', async () => {
+  const label = prompt('Bookmark label:', searchQuery || 'Untitled');
+  if (!label) return;
+  const memberIds = visibleEntries.map(e => e.id);
+  const bk = await apiPost('/api/bookmarks', {
+    label,
+    search_query: searchQuery || null,
+    breadcrumb: breadcrumb.textContent,
+    view_members: JSON.stringify(memberIds),
+  });
+  loadBookmarks();
+});
+
+async function loadBookmarks() {
+  try {
+    bookmarks = await api('/api/bookmarks');
+    renderBookmarks();
+  } catch (e) {
+    console.warn('Failed to load bookmarks:', e);
+  }
+}
+
+function renderBookmarks() {
+  bkEntries.innerHTML = '';
+  if (bookmarks.length === 0) {
+    bkEntries.innerHTML = '<div class="bk-empty">no bookmarks yet</div>';
+    return;
+  }
+  for (const bk of bookmarks) {
+    const div = document.createElement('div');
+    div.className = 'bk-item';
+
+    const lbl = document.createElement('span');
+    lbl.className = 'bk-item-label';
+    lbl.textContent = bk.label;
+
+    const sub = document.createElement('span');
+    sub.className = 'bk-item-sub';
+    sub.textContent = relDate(bk.created_at);
+
+    const del = document.createElement('button');
+    del.className = 'bk-item-del';
+    del.textContent = '×';
+    del.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await apiDelete(`/api/bookmarks/${bk.id}`);
+      loadBookmarks();
+    });
+
+    div.appendChild(lbl);
+    div.appendChild(sub);
+    div.appendChild(del);
+
+    div.addEventListener('click', () => restoreBookmark(bk));
+    bkEntries.appendChild(div);
+  }
+}
+
+function restoreBookmark(bk) {
+  if (bk.search_query) {
+    searchEl.value = bk.search_query;
+    searchClear.style.display = '';
+    applySearch();
+  }
+  if (bk.view_members) {
+    try {
+      const ids = JSON.parse(bk.view_members);
+      const memberSet = new Set(ids);
+      const members = allEntries.filter(e => memberSet.has(e.id));
+      if (members.length > 0) {
+        drillStack = [];
+        setVisibleEntries(members, bk.label);
+        btnBack.style.display = 'none';
+      }
+    } catch {}
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ENTITY DICTIONARY
+// ═══════════════════════════════════════════════════════════════
+btnBack.addEventListener('click', drillBack);
+
+// ═══════════════════════════════════════════════════════════════
+// ENRICHMENT STATUS POLLING
+// ═══════════════════════════════════════════════════════════════
+async function pollEnrichment() {
+  try {
+    const status = await api('/api/enrichment-status');
+    if (status.pending > 0) {
+      enrichStatus.textContent = `enriching: ${status.enriched}/${status.total_entries}`;
+      setTimeout(pollEnrichment, 10000);
+    } else if (status.enriched > 0) {
+      enrichStatus.textContent = `${status.enriched} entries enriched`;
+    } else {
+      enrichStatus.textContent = '';
+    }
+  } catch {
+    enrichStatus.textContent = '';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SERVER SWITCH (multi-database support)
+// ═══════════════════════════════════════════════════════════════
+// The server switch is a placeholder for multi-server setups.
+// For single-server, hide it.
+serverSwitch.style.display = 'none';
+
+// ═══════════════════════════════════════════════════════════════
+// BOOT
+// ═══════════════════════════════════════════════════════════════
+async function boot() {
+  restoreTheme();
+  initThree();
+
+  const bg = themes[themeIndex] === 'day' ? 0xf4f3f0 :
+             themes[themeIndex] === 'cloudy' ? 0x2a2a2e : 0x08080a;
+  renderer.setClearColor(bg, 1);
+
+  initControls();
+
+  try {
+    const data = await api('/api/export-viz');
+    if (data.error) {
+      loader.classList.add('gone');
+      panelEmpty.textContent = data.error;
+      return;
+    }
+
+    allEntries = data.entries || [];
+    allTags = data.tags || [];
+    allEntities = data.entities || [];
+    entityIndex = data.entity_index || {};
+    enrichedCount = data.enriched || 0;
+    visibleEntries = allEntries.slice();
+
+    buildCloud();
+    animate();
+    initTimeline();
+    loadBookmarks();
+    pollEnrichment();
+
+    updateBreadcrumb(`all entries (${allEntries.length})`);
+
+    // Fade out loader
+    setTimeout(() => loader.classList.add('gone'), 300);
+  } catch (err) {
+    console.error('Failed to load viz data:', err);
+    loader.classList.add('gone');
+    panelEmpty.textContent = 'Failed to connect to Cortex API';
+  }
+}
+
+boot();
+})();
+</script>
+</body></html>

@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(unzip -l cortex_deploy.zip 2>/dev/null | head -40)",
+      "Bash(unzip -p cortex_deploy.zip viz.html | tail -20)"
+    ]
+  }
+}
