@@ -665,7 +665,7 @@ async def cortex_store(params: StoreInput) -> str:
     try:
         conn.execute(
             "INSERT INTO entries (id, timestamp, content, tags, source, embedding, entry_type, temperature) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (entry_id, now, params.content, tags_json, params.source, embedding_blob, entry_type, 1.5)
+            (entry_id, now, params.content, tags_json, params.source, embedding_blob, params.entry_type if params.entry_type in VALID_ENTRY_TYPES else 'note', 1.5)
         )
         conn.execute(
             "INSERT INTO entries_fts(rowid, content, tags, source) SELECT rowid, content, tags, source FROM entries WHERE id = ?",
@@ -673,13 +673,14 @@ async def cortex_store(params: StoreInput) -> str:
         )
         conn.commit()
         preview = params.content[:80].replace("\n", " ")
-        print(f"[STORE] {entry_id}  type={entry_type}  [{', '.join(json.loads(tags_json))}]  {preview}...")
+        et = params.entry_type if params.entry_type in VALID_ENTRY_TYPES else 'note'
+        print(f"[STORE] {entry_id}  type={et}  [{', '.join(json.loads(tags_json))}]  {preview}...")
         return json.dumps({
             "status": "stored",
             "id": entry_id,
             "timestamp": now,
             "tags": json.loads(tags_json),
-            "entry_type": entry_type,
+            "entry_type": et,
             "content_preview": params.content[:100] + ("..." if len(params.content) > 100 else ""),
             "bytes": len(params.content.encode('utf-8')),
             "embedded": True
