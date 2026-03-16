@@ -65,11 +65,11 @@ final_score = similarity × (1 + 0.15 × e^(-age_days × ln2 / 30)). 15% max boo
 Write: cortex_store (accepts entry_type), cortex_update, cortex_update_tags, cortex_delete, cortex_build_links (v2)
 Read: cortex_search, cortex_semantic_search (temporal decay), cortex_list, cortex_get (returns type/temp/digest, boosts temp), cortex_edges (v2, boosts temp), cortex_stats (includes edges/types), cortex_export
 
-## REST API (unauthenticated, localhost only)
+## REST API (token-authenticated, localhost only)
 /api/stats (v2: edges, types) · /api/search · /api/semantic · /api/list · /api/export-viz (v2: edges, types, digest, temperature) · /api/enrichment-status · /api/bookmarks · /viz
 
 ## Security
-All servers bind 127.0.0.1 only (verified 2026-03-15 — zero services on 0.0.0.0). Token: emc2ymmv (query param or Authorization: Bearer header). HostRewriteMiddleware wraps MCP StreamableHTTP endpoint. CORS: * on REST API. Cloudflare tunnel provides the only external access path.
+All servers bind 127.0.0.1 only (verified 2026-03-15 — zero services on 0.0.0.0). Token auth (emc2ymmv) on ALL endpoints: MCP via HostRewriteMiddleware, REST API via check_api_token() (query param or Bearer header). /viz and / are unauthenticated (static HTML only). CORS restricted to fahrenheitrequited.dev origins — blocks DNS rebinding attacks. viz.html reads token from its own ?token= param and passes it in all fetch calls. Cloudflare tunnel provides the only external access path.
 
 ## Infrastructure
 Server: c-jfischer3. Python: ~/miniconda3/bin/python3. Source: ~/claude/cortex/dual-server.py (~1,820 lines). Git: requitefahrenheit/cortex, branch v2/enrichment-upgrade. Launch: `at now` with nohup (screen/setsid unreliable through dev tools). Tunnel: Cloudflare named tunnel "cortex" (ID: 5382c123).
