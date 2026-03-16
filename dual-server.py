@@ -64,10 +64,30 @@ def init_db():
             source TEXT NOT NULL DEFAULT 'unknown'
         )
     """)
-    # Add embedding column if it doesn't exist
+    # Add columns if they don't exist (upgrade path)
     cols = [row[1] for row in conn.execute("PRAGMA table_info(entries)").fetchall()]
     if "embedding" not in cols:
         conn.execute("ALTER TABLE entries ADD COLUMN embedding BLOB")
+    if "entry_type" not in cols:
+        conn.execute("ALTER TABLE entries ADD COLUMN entry_type TEXT DEFAULT 'note'")
+    if "temperature" not in cols:
+        conn.execute("ALTER TABLE entries ADD COLUMN temperature REAL DEFAULT 1.0")
+
+    # Edges table for auto-linked entries (similarity, co-tag, etc.)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS edges (
+            id TEXT PRIMARY KEY,
+            source_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+            target_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+            weight REAL NOT NULL,
+            edge_type TEXT DEFAULT 'similar',
+            auto_created INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(source_id, target_id)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_id)")
 
     conn.execute("""
         CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts
@@ -81,10 +101,15 @@ def init_db():
             entities TEXT NOT NULL DEFAULT '[]',
             relationships TEXT NOT NULL DEFAULT '[]',
             summary TEXT NOT NULL DEFAULT '',
+            digest TEXT NOT NULL DEFAULT '',
             openai_embedding BLOB,
             processed_at TEXT NOT NULL
         )
     """)
+    # Add digest column if missing (upgrade path)
+    enrich_cols = [row[1] for row in conn.execute("PRAGMA table_info(enrichments)").fetchall()]
+    if "digest" not in enrich_cols:
+        conn.execute("ALTER TABLE enrichments ADD COLUMN digest TEXT NOT NULL DEFAULT ''")
 
     # Bookmarks table for viz saved views
     conn.execute("""
@@ -184,6 +209,8 @@ TAGS: {tags}
 Respond with ONLY valid JSON (no markdown, no backticks):
 {{
   "summary": "A concise one-line summary (max 80 chars) suitable as a label in a visualization",
+  "digest": "A 2-4 sentence narrative description of what this entry captures, why it matters, and what context it connects to. Write as if helping someone remember this knowledge months later. Be specific and concrete — names, versions, decisions, not abstractions.",
+  "entry_type": "one of: decision, insight, bug, feature, architecture, context, skill, monologue, research, personal, reference, note",
   "entities": ["list", "of", "key", "entities", "mentioned"],
   "relationships": [
     {{"entity": "entity_name", "type": "relationship_type"}}
@@ -204,7 +231,27 @@ Rules for relationships:
 Rules for summary:
 - Max 80 characters
 - Should capture the core topic, not just repeat tags
-- Should be useful as a node label in a graph visualization"""
+- Should be useful as a node label in a graph visualization
+
+Rules for digest:
+- 2-4 sentences, vivid and specific
+- Include what decision was made, what problem was solved, or what was learned
+- Mention specific names, ports, files, tools — not vague references
+- Write as if briefing a future agent who needs to pick up this thread
+
+Rules for entry_type:
+- decision: a choice was made between alternatives
+- insight: a realization or pattern recognized
+- bug: a problem identified or fixed
+- feature: something built or planned
+- architecture: system design, infrastructure
+- context: background information, personal details
+- skill: reusable workflow or technique
+- monologue: experiential reflection, inner state
+- research: investigation, analysis, comparison
+- personal: appointments, relationships, life events
+- reference: documentation, specs, links
+- note: default, general knowledge"""
 
 
 async def openai_chat(messages, model=None):
@@ -252,11 +299,15 @@ async def enrich_entry(entry_id, content, tags):
         entities = extracted.get("entities", [])
         relationships = extracted.get("relationships", [])
         summary = extracted.get("summary", "")[:80]
+        digest = extracted.get("digest", "")
+        classified_type = extracted.get("entry_type", "note")
     except Exception as e:
         print(f"[ENRICH] Extraction failed for {entry_id}: {e}")
         entities = []
         relationships = []
         summary = ""
+        digest = ""
+        classified_type = "note"
 
     # OpenAI embedding
     openai_blob = None
@@ -271,11 +322,17 @@ async def enrich_entry(entry_id, content, tags):
     conn = get_db()
     try:
         conn.execute("""
-            INSERT OR REPLACE INTO enrichments (entry_id, entities, relationships, summary, openai_embedding, processed_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (entry_id, json.dumps(entities), json.dumps(relationships), summary, openai_blob, now))
+            INSERT OR REPLACE INTO enrichments (entry_id, entities, relationships, summary, digest, openai_embedding, processed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (entry_id, json.dumps(entities), json.dumps(relationships), summary, digest, openai_blob, now))
+        # Auto-classify entry_type if still default
+        current_type = conn.execute("SELECT entry_type FROM entries WHERE id = ?", (entry_id,)).fetchone()
+        if current_type and current_type[0] in (None, 'note'):
+            valid_types = {'decision','insight','bug','feature','architecture','context','skill','monologue','research','personal','reference','note'}
+            if classified_type in valid_types:
+                conn.execute("UPDATE entries SET entry_type = ? WHERE id = ?", (classified_type, entry_id))
         conn.commit()
-        print(f"[ENRICH] {entry_id}: {len(entities)} entities, {len(relationships)} rels, summary='{summary[:40]}...'")
+        print(f"[ENRICH] {entry_id}: {len(entities)} ent, {len(relationships)} rels, type={classified_type}, digest={len(digest)}ch")
     except Exception as e:
         print(f"[ENRICH] DB write failed for {entry_id}: {e}")
     finally:
@@ -297,26 +354,35 @@ def get_unenriched_entries(limit=None):
     return [{"id": r["id"], "content": r["content"], "tags": json.loads(r["tags"])} for r in rows]
 
 
+ENRICHMENT_PARALLEL = 3  # concurrent enrichment tasks
+
 async def process_enrichment_batch():
-    """Process a batch of unenriched entries."""
+    """Process a batch of unenriched entries in parallel."""
     if not OPENAI_API_KEY:
         return 0
     entries = get_unenriched_entries()
     if not entries:
         return 0
+
+    # Process in parallel (up to ENRICHMENT_PARALLEL concurrent)
+    sem = asyncio.Semaphore(ENRICHMENT_PARALLEL)
     count = 0
-    for entry in entries:
-        try:
-            await enrich_entry(entry["id"], entry["content"], entry["tags"])
-            count += 1
-            await asyncio.sleep(0.0)  # Rate limiting courtesy
-        except Exception as e:
-            print(f"[ENRICH] Error processing {entry['id']}: {e}")
+
+    async def _enrich_one(entry):
+        nonlocal count
+        async with sem:
+            try:
+                await enrich_entry(entry["id"], entry["content"], entry["tags"])
+                count += 1
+            except Exception as e:
+                print(f"[ENRICH] Error processing {entry['id']}: {e}")
+
+    await asyncio.gather(*[_enrich_one(e) for e in entries])
     return count
 
 
 async def enrichment_worker():
-    """Background worker that continuously processes unenriched entries."""
+    """Background worker: enrichment + auto-linking + temperature decay."""
     if not OPENAI_API_KEY:
         print("[ENRICH] No OPENAI_API_KEY set — enrichment disabled")
         return
@@ -333,15 +399,33 @@ async def enrichment_worker():
     if total > 0:
         print(f"[ENRICH] Backfill complete: {total} entries enriched")
 
+    # Build initial auto-links after backfill
+    try:
+        build_auto_links()
+        build_co_tag_links()
+    except Exception as e:
+        print(f"[LINKS] Initial link build failed: {e}")
+
     # Ongoing monitoring
+    cycle = 0
     while True:
         await asyncio.sleep(ENRICHMENT_INTERVAL)
+        cycle += 1
         try:
             n = await process_enrichment_batch()
             if n > 0:
                 print(f"[ENRICH] Processed {n} new entries")
+                # Rebuild links when new entries enriched
+                build_auto_links()
         except Exception as e:
             print(f"[ENRICH] Worker error: {e}")
+
+        # Temperature decay every ~100 cycles (~17 min)
+        if cycle % 100 == 0:
+            try:
+                decay_temperatures()
+            except Exception as e:
+                print(f"[TEMP] Decay error: {e}")
 
 
 def start_enrichment_worker():
@@ -355,7 +439,120 @@ def start_enrichment_worker():
     return thread
 
 
+# === Auto-Link Builder ===
+
+EDGE_SIMILARITY_THRESHOLD = 0.55  # minimum cosine similarity for auto-linking
+EDGE_TOP_K = 5                     # max edges per entry
+
+def build_auto_links(batch_size=500):
+    """Build cosine similarity edges between entries, like OpenPhoto's auto-linker.
+    Computes top-K neighbors above threshold for each entry.
+    Safe to re-run — uses INSERT OR IGNORE with UNIQUE(source_id, target_id)."""
+    conn = get_db()
+    rows = conn.execute('SELECT id, embedding FROM entries WHERE embedding IS NOT NULL').fetchall()
+    if len(rows) < 2:
+        conn.close()
+        return 0
+
+    ids = [r['id'] for r in rows]
+    embs = np.array([bytes_to_vec(r['embedding']) for r in rows])
+    # Already L2-normalized from embed_text(), so cosine sim = dot product
+
+    edge_count = 0
+    for i in range(0, len(ids), batch_size):
+        chunk = embs[i:i+batch_size]
+        sims = chunk @ embs.T  # (batch, N) dot product matrix
+        edges = []
+        for j, row_sims in enumerate(sims):
+            global_i = i + j
+            row_sims[global_i] = -1  # exclude self
+            top_k = np.argpartition(row_sims, -EDGE_TOP_K)[-EDGE_TOP_K:]
+            for k in top_k:
+                if row_sims[k] >= EDGE_SIMILARITY_THRESHOLD:
+                    src, tgt = ids[global_i], ids[int(k)]
+                    if src < tgt:  # canonical ordering to avoid duplicates
+                        edges.append((gen_id(), src, tgt, float(row_sims[k]), 'similar', 1))
+        if edges:
+            conn.executemany(
+                "INSERT OR IGNORE INTO edges (id, source_id, target_id, weight, edge_type, auto_created) VALUES (?,?,?,?,?,?)",
+                edges
+            )
+            edge_count += len(edges)
+    conn.commit()
+    total = conn.execute('SELECT COUNT(*) FROM edges').fetchone()[0]
+    conn.close()
+    print(f"[LINKS] Added {edge_count} edges ({total} total)")
+    return edge_count
+
+
+def build_co_tag_links():
+    """Build edges between entries that share tags."""
+    conn = get_db()
+    rows = conn.execute('SELECT id, tags FROM entries').fetchall()
+    conn.close()
+
+    # Build tag → entry_ids index
+    tag_index = {}
+    for r in rows:
+        for tag in json.loads(r['tags']):
+            if tag not in tag_index:
+                tag_index[tag] = []
+            tag_index[tag].append(r['id'])
+
+    edges = []
+    seen = set()
+    for tag, entry_ids in tag_index.items():
+        if len(entry_ids) > 50:  # skip overly common tags
+            continue
+        for a in entry_ids:
+            for b in entry_ids:
+                if a < b:
+                    pair = (a, b)
+                    if pair not in seen:
+                        seen.add(pair)
+                        edges.append((gen_id(), a, b, 0.4, 'co_tag', 1))
+
+    if edges:
+        conn = get_db()
+        conn.executemany(
+            "INSERT OR IGNORE INTO edges (id, source_id, target_id, weight, edge_type, auto_created) VALUES (?,?,?,?,?,?)",
+            edges
+        )
+        conn.commit()
+        conn.close()
+    print(f"[LINKS] Added {len(edges)} co-tag edges")
+    return len(edges)
+
+
+# === Temperature Decay ===
+
+TEMP_DECAY_RATE = 0.98     # multiply temperature by this each day
+TEMP_FLOOR = 0.1           # minimum temperature
+TEMP_VISIT_BOOST = 0.3     # boost when an entry is accessed
+
+def decay_temperatures():
+    """Decay all entry temperatures. Run daily."""
+    conn = get_db()
+    conn.execute(f"UPDATE entries SET temperature = MAX(?, temperature * ?) WHERE temperature > ?",
+                 (TEMP_FLOOR, TEMP_DECAY_RATE, TEMP_FLOOR))
+    conn.commit()
+    affected = conn.total_changes
+    conn.close()
+    print(f"[TEMP] Decayed {affected} entries")
+    return affected
+
+def boost_temperature(entry_id):
+    """Boost an entry's temperature when it's accessed."""
+    conn = get_db()
+    conn.execute("UPDATE entries SET temperature = MIN(2.0, temperature + ?) WHERE id = ?",
+                 (TEMP_VISIT_BOOST, entry_id))
+    conn.commit()
+    conn.close()
+
+
 # === Input Models ===
+
+VALID_ENTRY_TYPES = {'decision','insight','bug','feature','architecture','context','skill','monologue','research','personal','reference','note'}
 
 class StoreInput(BaseModel):
     """Input for storing a new entry."""
@@ -363,6 +560,7 @@ class StoreInput(BaseModel):
     content: str = Field(..., description="The text content to store", min_length=1)
     tags: List[str] = Field(default_factory=list, description="Tags for categorization, e.g. ['mcp', 'architecture', 'bugfix']")
     source: str = Field(default="unknown", description="Source thread or context description, e.g. 'Thread: MCP server design'")
+    entry_type: str = Field(default="note", description="Entry type: decision, insight, bug, feature, architecture, context, skill, monologue, research, personal, reference, note")
 
 class SearchInput(BaseModel):
     """Input for searching entries."""
@@ -466,8 +664,8 @@ async def cortex_store(params: StoreInput) -> str:
     conn = get_db()
     try:
         conn.execute(
-            "INSERT INTO entries (id, timestamp, content, tags, source, embedding) VALUES (?, ?, ?, ?, ?, ?)",
-            (entry_id, now, params.content, tags_json, params.source, embedding_blob)
+            "INSERT INTO entries (id, timestamp, content, tags, source, embedding, entry_type, temperature) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (entry_id, now, params.content, tags_json, params.source, embedding_blob, entry_type, 1.5)
         )
         conn.execute(
             "INSERT INTO entries_fts(rowid, content, tags, source) SELECT rowid, content, tags, source FROM entries WHERE id = ?",
@@ -475,12 +673,13 @@ async def cortex_store(params: StoreInput) -> str:
         )
         conn.commit()
         preview = params.content[:80].replace("\n", " ")
-        print(f"[STORE] {entry_id}  [{', '.join(json.loads(tags_json))}]  {preview}...")
+        print(f"[STORE] {entry_id}  type={entry_type}  [{', '.join(json.loads(tags_json))}]  {preview}...")
         return json.dumps({
             "status": "stored",
             "id": entry_id,
             "timestamp": now,
             "tags": json.loads(tags_json),
+            "entry_type": entry_type,
             "content_preview": params.content[:100] + ("..." if len(params.content) > 100 else ""),
             "bytes": len(params.content.encode('utf-8')),
             "embedded": True
@@ -576,21 +775,38 @@ async def cortex_semantic_search(params: SemanticSearchInput) -> str:
             "SELECT id, timestamp, content, tags, source, embedding FROM entries WHERE embedding IS NOT NULL"
         ).fetchall()
 
+        # Temporal decay: recent entries get a boost
+        # Formula: final_score = similarity * (1 + recency_boost * decay_factor)
+        # decay_factor = exp(-age_days / half_life_days)
+        import math
+        RECENCY_BOOST = 0.15  # max 15% boost for brand-new entries
+        HALF_LIFE_DAYS = 30   # boost halves every 30 days
+        now_ts = time.time()
+
         scored = []
         for row in rows:
             entry_vec = bytes_to_vec(row["embedding"])
-            score = cosine_sim(query_vec, entry_vec)
-            if score >= params.threshold:
+            raw_sim = cosine_sim(query_vec, entry_vec)
+            if raw_sim >= params.threshold:
+                # Compute recency boost
+                try:
+                    entry_ts = datetime.fromisoformat(row["timestamp"]).timestamp()
+                    age_days = max(0, (now_ts - entry_ts) / 86400)
+                    decay = math.exp(-age_days * 0.693 / HALF_LIFE_DAYS)  # ln(2) ≈ 0.693
+                    score = raw_sim * (1 + RECENCY_BOOST * decay)
+                except:
+                    score = raw_sim
                 scored.append({
                     "id": row["id"],
                     "timestamp": row["timestamp"],
                     "content": row["content"],
                     "tags": json.loads(row["tags"]),
                     "source": row["source"],
-                    "similarity": round(score, 4),
+                    "similarity": round(raw_sim, 4),
+                    "boosted_score": round(score, 4),
                 })
 
-        scored.sort(key=lambda x: x["similarity"], reverse=True)
+        scored.sort(key=lambda x: x["boosted_score"], reverse=True)
         results = scored[:params.limit]
 
         top_score = results[0]["similarity"] if results else 0
@@ -696,18 +912,31 @@ async def cortex_get(params: GetInput) -> str:
     conn = get_db()
     try:
         row = conn.execute(
-            "SELECT id, timestamp, content, tags, source FROM entries WHERE id = ?",
+            "SELECT id, timestamp, content, tags, source, entry_type, temperature FROM entries WHERE id = ?",
             (params.entry_id,)
         ).fetchone()
         if not row:
             return json.dumps({"error": f"Entry {params.entry_id} not found"})
-        return json.dumps({
+        # Boost temperature on access
+        boost_temperature(params.entry_id)
+        # Get digest from enrichments if available
+        enrichment = conn.execute(
+            "SELECT summary, digest FROM enrichments WHERE entry_id = ?",
+            (params.entry_id,)
+        ).fetchone()
+        result = {
             "id": row["id"],
             "timestamp": row["timestamp"],
             "content": row["content"],
             "tags": json.loads(row["tags"]),
             "source": row["source"],
-        }, indent=2)
+            "entry_type": row["entry_type"] or "note",
+            "temperature": row["temperature"] or 1.0,
+        }
+        if enrichment:
+            result["summary"] = enrichment["summary"]
+            result["digest"] = enrichment["digest"]
+        return json.dumps(result, indent=2)
     finally:
         conn.close()
 
@@ -954,15 +1183,33 @@ async def cortex_stats() -> str:
         newest = rows[-1]["timestamp"]
         db_size = os.path.getsize(DB_PATH) if os.path.exists(DB_PATH) else 0
 
+        # Edge and enrichment stats
+        try:
+            edge_count = conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
+        except:
+            edge_count = 0
+        try:
+            enriched_count = conn.execute("SELECT COUNT(*) FROM enrichments").fetchone()[0]
+        except:
+            enriched_count = 0
+        try:
+            type_rows = conn.execute("SELECT entry_type, COUNT(*) as cnt FROM entries GROUP BY entry_type").fetchall()
+            type_dist = {(r[0] or "note"): r[1] for r in type_rows}
+        except:
+            type_dist = {}
+
         return json.dumps({
             "entries": total,
             "embedded": embedded,
+            "enriched": enriched_count,
+            "edges": edge_count,
             "content_bytes": total_bytes,
             "content_kb": round(total_bytes / 1024, 1),
             "db_file_bytes": db_size,
             "db_file_kb": round(db_size / 1024, 1),
             "tags": sorted(all_tags),
             "tag_count": len(all_tags),
+            "type_distribution": type_dist,
             "oldest_entry": oldest,
             "newest_entry": newest,
             "model": EMBED_MODEL,
@@ -973,9 +1220,97 @@ async def cortex_stats() -> str:
         conn.close()
 
 
+@mcp.tool(
+    name="cortex_build_links",
+    annotations={
+        "title": "Build Auto-Links",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+)
+async def cortex_build_links() -> str:
+    """Build automatic similarity edges between entries using cosine similarity
+    on embeddings. Also builds co-tag edges. Safe to re-run — won't create duplicates.
+
+    Returns:
+        JSON with edge counts.
+    """
+    if err := _check_writable("build_links"):
+        return err
+    sim_count = build_auto_links()
+    tag_count = build_co_tag_links()
+    conn = get_db()
+    total = conn.execute('SELECT COUNT(*) FROM edges').fetchone()[0]
+    conn.close()
+    return json.dumps({
+        "status": "complete",
+        "similarity_edges_added": sim_count,
+        "co_tag_edges_added": tag_count,
+        "total_edges": total,
+    }, indent=2)
+
+
+@mcp.tool(
+    name="cortex_edges",
+    annotations={
+        "title": "Get Entry Edges",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+)
+async def cortex_edges(params: GetInput) -> str:
+    """Get all edges (connections) for a specific entry. Returns linked entries
+    with similarity scores and edge types.
+
+    Args:
+        params: GetInput with entry_id.
+
+    Returns:
+        JSON with list of connected entries and their edge weights.
+    """
+    conn = get_db()
+    try:
+        rows = conn.execute("""
+            SELECT e.id, e.weight, e.edge_type,
+                   CASE WHEN e.source_id = ? THEN e.target_id ELSE e.source_id END as neighbor_id
+            FROM edges e
+            WHERE e.source_id = ? OR e.target_id = ?
+            ORDER BY e.weight DESC
+        """, (params.entry_id, params.entry_id, params.entry_id)).fetchall()
+
+        neighbors = []
+        for row in rows:
+            neighbor = conn.execute(
+                "SELECT id, timestamp, content, tags, source, entry_type FROM entries WHERE id = ?",
+                (row['neighbor_id'],)
+            ).fetchone()
+            if neighbor:
+                neighbors.append({
+                    "id": neighbor['id'],
+                    "content": neighbor['content'][:200],
+                    "tags": json.loads(neighbor['tags']),
+                    "entry_type": neighbor['entry_type'],
+                    "weight": row['weight'],
+                    "edge_type": row['edge_type'],
+                })
+        # Boost temperature on access
+        boost_temperature(params.entry_id)
+
+        return json.dumps({
+            "entry_id": params.entry_id,
+            "edge_count": len(neighbors),
+            "neighbors": neighbors
+        }, indent=2)
+    finally:
+        conn.close()
+
+
 # === ASGI Middleware ===
 
-# Load bearer token
 # Token auth
 MCP_TOKEN = os.environ.get("CORTEX_TOKEN", "emc2ymmv")
 
@@ -1159,10 +1494,22 @@ if __name__ == "__main__":
         for r in rows:
             for t in json.loads(r["tags"]):
                 all_tags.add(t)
+        # Edge count
+        try:
+            edge_count = conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
+        except:
+            edge_count = 0
+        # Type distribution
+        try:
+            type_rows = conn.execute("SELECT entry_type, COUNT(*) as cnt FROM entries GROUP BY entry_type").fetchall()
+            type_dist = {r["entry_type"] or "note": r["cnt"] for r in type_rows}
+        except:
+            type_dist = {}
         conn.close()
         db_size = os.path.getsize(DB_PATH) if os.path.exists(DB_PATH) else 0
         return cors_response({"entries": total, "embedded": embedded, "enriched": enriched,
-                             "content_bytes": total_bytes,
+                             "edges": edge_count, "content_bytes": total_bytes,
+                             "type_distribution": type_dist,
                              "db_bytes": db_size, "tags": sorted(all_tags), "oldest": rows[0]["timestamp"],
                              "newest": rows[-1]["timestamp"], "read_only": READ_ONLY})
 
@@ -1172,7 +1519,7 @@ if __name__ == "__main__":
         # Check which optional columns exist in entries table
         col_info = conn.execute("PRAGMA table_info(entries)").fetchall()
         col_names = {c["name"] for c in col_info}
-        opt_cols = [c for c in ("convo_id", "metadata", "raw_excerpt") if c in col_names]
+        opt_cols = [c for c in ("convo_id", "metadata", "raw_excerpt", "entry_type", "temperature") if c in col_names]
         select_cols = "id, timestamp, content, tags, source, embedding" + (", " + ", ".join(opt_cols) if opt_cols else "")
         rows = conn.execute(
             f"SELECT {select_cols} FROM entries WHERE embedding IS NOT NULL ORDER BY timestamp"
@@ -1181,7 +1528,7 @@ if __name__ == "__main__":
         # Load enrichments (table may not exist)
         try:
             enrichment_rows = conn.execute(
-                "SELECT entry_id, entities, relationships, summary, openai_embedding FROM enrichments"
+                "SELECT entry_id, entities, relationships, summary, digest, openai_embedding FROM enrichments"
             ).fetchall()
         except sqlite3.OperationalError:
             enrichment_rows = []
@@ -1193,6 +1540,7 @@ if __name__ == "__main__":
                 "entities": json.loads(er["entities"]),
                 "relationships": json.loads(er["relationships"]),
                 "summary": er["summary"],
+                "digest": er["digest"] if "digest" in er.keys() else "",
                 "openai_embedding": er["openai_embedding"],
             }
 
@@ -1214,6 +1562,8 @@ if __name__ == "__main__":
                 "content": r["content"],
                 "tags": json.loads(r["tags"]),
                 "source": r["source"],
+                "entry_type": r["entry_type"] if "entry_type" in r.keys() else "note",
+                "temperature": r["temperature"] if "temperature" in r.keys() else 1.0,
                 "convo_id": r["convo_id"] if "convo_id" in r.keys() else None,
                 "raw_excerpt": r["raw_excerpt"] if "raw_excerpt" in r.keys() else None,
             }
@@ -1230,6 +1580,7 @@ if __name__ == "__main__":
                 entry["entities"] = en["entities"]
                 entry["relationships"] = en["relationships"]
                 entry["summary"] = en["summary"]
+                entry["digest"] = en.get("digest", "")
 
             entries.append(entry)
 
@@ -1289,6 +1640,33 @@ if __name__ == "__main__":
 
         enriched_count = sum(1 for e in entries if "entities" in e)
 
+        # Load edges for visualization
+        conn2 = get_db()
+        try:
+            edge_rows = conn2.execute(
+                "SELECT source_id, target_id, weight, edge_type FROM edges ORDER BY weight DESC"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            edge_rows = []
+        conn2.close()
+
+        viz_edges = []
+        entry_id_set = set(e["id"] for e in entries)
+        for er in edge_rows:
+            if er["source_id"] in entry_id_set and er["target_id"] in entry_id_set:
+                viz_edges.append({
+                    "source": er["source_id"],
+                    "target": er["target_id"],
+                    "weight": er["weight"],
+                    "type": er["edge_type"],
+                })
+
+        # Type distribution
+        type_counts = {}
+        for e in entries:
+            t = e.get("entry_type", "note") or "note"
+            type_counts[t] = type_counts.get(t, 0) + 1
+
         return cors_response({
             "count": len(entries),
             "enriched": enriched_count,
@@ -1298,6 +1676,9 @@ if __name__ == "__main__":
             "tags": sorted(all_tags),
             "entities": sorted(all_entities),
             "entity_index": entity_index,
+            "type_distribution": type_counts,
+            "edge_count": len(viz_edges),
+            "edges": viz_edges,
             "entries": entries,
         })
 
