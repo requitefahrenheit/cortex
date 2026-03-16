@@ -393,6 +393,7 @@ body.tl-open #btn-back{bottom:82px}
 // CONFIG
 // ═══════════════════════════════════════════════════════════════
 const API_BASE = location.origin;
+const API_TOKEN = new URLSearchParams(location.search).get('token') || '';
 const POINT_SIZE = 4.0;
 const HOVER_SIZE = 8.0;
 const CLUSTER_SPREAD = 2.4;
@@ -496,14 +497,18 @@ const serverSwitch= $('server-switch');
 // ═══════════════════════════════════════════════════════════════
 // HELPERS
 // ═══════════════════════════════════════════════════════════════
+function apiUrl(path) {
+  const sep = path.includes('?') ? '&' : '?';
+  return API_BASE + path + (API_TOKEN ? sep + 'token=' + API_TOKEN : '');
+}
 function api(path) {
-  return fetch(API_BASE + path).then(r => r.json());
+  return fetch(apiUrl(path)).then(r => r.json());
 }
 function apiPost(path, body) {
-  return fetch(API_BASE + path, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)}).then(r => r.json());
+  return fetch(apiUrl(path), {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)}).then(r => r.json());
 }
 function apiDelete(path) {
-  return fetch(API_BASE + path, {method:'DELETE'}).then(r => r.json());
+  return fetch(apiUrl(path), {method:'DELETE'}).then(r => r.json());
 }
 
 function truncate(s, n) { return s.length > n ? s.slice(0, n) + '…' : s; }

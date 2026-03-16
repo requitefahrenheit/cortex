@@ -1387,13 +1387,37 @@ if __name__ == "__main__":
 
     # --- REST API handlers ---
 
-    def cors_response(data, status_code=200):
-        """JSONResponse with CORS headers."""
+    ALLOWED_ORIGINS = {
+        "https://cortex.fahrenheitrequited.dev",
+        "https://autonomous.fahrenheitrequited.dev",
+        "https://openmind.fahrenheitrequited.dev",
+        "https://om.fahrenheitrequited.dev",
+    }
+
+    def cors_response(data, status_code=200, request=None):
+        """JSONResponse with restrictive CORS headers."""
         resp = JSONResponse(data, status_code=status_code)
-        resp.headers["Access-Control-Allow-Origin"] = "*"
+        origin = None
+        if request:
+            origin = request.headers.get("origin", "")
+        if origin in ALLOWED_ORIGINS:
+            resp.headers["Access-Control-Allow-Origin"] = origin
+        else:
+            resp.headers["Access-Control-Allow-Origin"] = "https://cortex.fahrenheitrequited.dev"
         resp.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
-        resp.headers["Access-Control-Allow-Headers"] = "*"
+        resp.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+        resp.headers["Vary"] = "Origin"
         return resp
+
+    def check_api_token(request: Request) -> bool:
+        """Verify token on REST API requests. Checks query param or Bearer header."""
+        token = request.query_params.get("token", "")
+        if token == MCP_TOKEN:
+            return True
+        auth = request.headers.get("authorization", "")
+        if auth == f"Bearer {MCP_TOKEN}":
+            return True
+        return False
 
     async def serve_viz(request: Request):
         """Serve the Cortex visualization HTML."""
@@ -1790,23 +1814,37 @@ if __name__ == "__main__":
 
                 # Handle CORS preflight for all /api/ routes
                 if path.startswith("/api/") and method == "OPTIONS":
-                    response = cors_response({})
+                    request = Request(scope, receive)
+                    response = cors_response({}, request=request)
                     await response(scope, receive, send)
                     return
 
-                # Handle DELETE /api/bookmarks/<id>
-                if path.startswith("/api/bookmarks/") and method == "DELETE":
-                    try:
-                        bid = int(path.split("/")[-1])
-                        request = Request(scope, receive)
-                        response = await api_bookmark_delete(request, bid)
+                # Token auth for all /api/ routes (not /viz)
+                if path.startswith("/api/"):
+                    request = Request(scope, receive)
+                    if not check_api_token(request):
+                        response = cors_response({"error": "unauthorized"}, 401, request=request)
                         await response(scope, receive, send)
                         return
-                    except (ValueError, IndexError):
-                        pass
 
-                # Exact route matching
-                if path in self.routes:
+                    # Handle DELETE /api/bookmarks/<id>
+                    if path.startswith("/api/bookmarks/") and method == "DELETE":
+                        try:
+                            bid = int(path.split("/")[-1])
+                            response = await api_bookmark_delete(request, bid)
+                            await response(scope, receive, send)
+                            return
+                        except (ValueError, IndexError):
+                            pass
+
+                    # Exact route matching for /api/*
+                    if path in self.routes:
+                        response = await self.routes[path](request)
+                        await response(scope, receive, send)
+                        return
+
+                # Unauthenticated routes: /viz, /
+                if path in ("/viz", "/"):
                     request = Request(scope, receive)
                     response = await self.routes[path](request)
                     await response(scope, receive, send)
